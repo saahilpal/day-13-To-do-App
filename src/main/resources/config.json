@@ -2,7 +2,7 @@
   "smtp_host": "smtp.gmail.com",
   "smtp_port": 587,
   "smtp_user": "23bcad49@kristujayanti.com",
-  "smtp_password": "HOTpot-2GETfew-3TOWlow",
+  "smtp_password": 
   "mongo_uri": "mongodb://localhost:27017",
   "mongo_db": "Todo"
 }
