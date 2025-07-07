@@ -1,31 +1,67 @@
 package com.example.service;
 
-import com.example.model.User;
+import com.example.security.JwtProvider;
+import com.example.security.PasswordHasher;
+import io.vertx.core.json.JsonObject;
+import io.vertx.ext.mongo.MongoClient;
 
-import java.util.*;
+
+import java.time.Duration;
+import java.util.List;
 
 public class AuthService {
-    private final Map<String, User> users = new HashMap<>();
 
-    public void register(String email, String name) {
-        if (users.containsKey(email)) {
-            System.out.println("User already exists.");
-            return;
-        }
-        String password = UUID.randomUUID().toString().substring(0, 8);
-        String hashed = PasswordUtil.hash(password);
-        User user = new User(email, name, hashed);
-        users.put(email, user);
-        System.out.println("Registered. Your password: " + password);
+    private final MongoClient mongo;
+    private final RedisAPI redis;
+    private final JwtProvider jwtProvider;
+    private final EmailService emailService;
+
+    public AuthService(MongoClient mongo, RedisAPI redis, JwtProvider jwtProvider, EmailService emailService) {
+        this.mongo = mongo;
+        this.redis = redis;
+        this.jwtProvider = jwtProvider;
+        this.emailService = emailService;
     }
 
-    public String login(String email, String password) {
-        User user = users.get(email);
-        if (user != null && PasswordUtil.verify(password, user.hashedPassword)) {
-            System.out.println("Login successful.");
-            return email;
-        }
-        System.out.println("Login failed.");
-        return null;
+    public void login(String email, String password) {
+        JsonObject query = new JsonObject().put("email", email).put("type", "user");
+
+        mongo.findOne("data", query, null).onSuccess(user -> {
+            if (user == null) {
+                System.out.println("Invalid credentials");
+                return;
+            }
+
+            String hashed = user.getString("hashedPassword");
+            if (!PasswordHasher.verify(password, hashed)) {
+                System.out.println("Invalid password");
+                return;
+            }
+
+            String userId = user.getString("_id");
+            String token = jwtProvider.generateToken(userId);
+
+            // Store token in Redis with 1-hour expiry
+            redis.setex(List.of(token, "3600", userId), res -> {
+                if (res.succeeded()) {
+                    System.out.println("Login successful. JWT: " + token);
+                } else {
+                    System.err.println(" Failed to store token: " + res.cause().getMessage());
+                }
+            });
+
+        }).onFailure(err -> {
+            System.err.println(" Login error: " + err.getMessage());
+        });
+    }
+
+    public void logout(String token) {
+        redis.del(List.of(token), res -> {
+            if (res.succeeded()) {
+                System.out.println("Logged out and token invalidated.");
+            } else {
+                System.err.println("Logout failed: " + res.cause().getMessage());
+            }
+        });
     }
 }
